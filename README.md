@@ -69,7 +69,7 @@ TBD
 
 ## Links
 
-- RESOLino_Pt1000 Shield: (TBD: add Amazon link here)
+- RESOLino_Pt1000 Shield: [Buy at amazon](https://www.amazon.de/RESOL-73041-RESOLino-Pt1000-Shield/dp/B01IVSCTS8)
 - GitHub Repository: [https://github.com/resol-de/RESOLino_Pt1000](https://github.com/resol-de/RESOLino_Pt1000)
 
 
