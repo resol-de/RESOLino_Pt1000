@@ -1,6 +1,6 @@
 # RESOLino_Pt1000
 
-A Arduino library and shield firmware to measure Pt1000 temperature sensors using RESOL's shield.
+An Arduino library and shield firmware to measure Pt1000 temperature sensors using RESOL's shield.
 
 
 ## Features
@@ -15,7 +15,7 @@ A Arduino library and shield firmware to measure Pt1000 temperature sensors usin
 
 ### Example
 
-TBD
+[RESOLino_Pt1000/Example/Example.ino](RESOLino_Pt1000/Example/Example.ino)
 
 
 
