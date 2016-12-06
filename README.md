@@ -13,6 +13,11 @@ An Arduino library and shield firmware to measure Pt1000 temperature sensors usi
 
 ## Using the Library
 
+### Serial Connection
+
+SoftwareSerial works directly on Arduino Uno and Yun and Mega. For Arduino Due and Genuino ZERO there is currently no SoftwareSerial library available. So HardwareSerial must be used on these boards and in RESOLino_PT1000.h the line #define SOFTWARESERIAL_AVAILABLE must be deleted or commented out.
+
+
 ### Example
 
 [RESOLino_Pt1000/Example/Example.ino](RESOLino_Pt1000/Example/Example.ino)

@@ -44,7 +44,9 @@ static uint8_t _RxBuffer[17];
 static double Values[8];
 
 static HardwareSerial *HWSerial;
-static SoftwareSerial *SWSerial;
+#if defined SOFTWARESERIAL_AVAILABLE
+	static SoftwareSerial *SWSerial;
+#endif
 
 static uint16_t ValueIDs[8] = {
 	0x1001,
@@ -59,13 +61,17 @@ static uint16_t ValueIDs[8] = {
 
 RESOLino_Pt1000::RESOLino_Pt1000(HardwareSerial *ser) {
 	HWSerial = ser;
+#if defined SOFTWARESERIAL_AVAILABLE
 	SWSerial = NULL;
+#endif
 }
 
+#if defined SOFTWARESERIAL_AVAILABLE
 RESOLino_Pt1000::RESOLino_Pt1000(SoftwareSerial *ser) {
 	HWSerial = NULL;
 	SWSerial = ser;
 }
+#endif
 
 void RESOLino_Pt1000::init(uint32_t Baudrate) {
 	_RxIndex = -1;
@@ -183,35 +189,51 @@ int RESOLino_Pt1000::receive(void) {
 }
 
 void RESOLino_Pt1000::begin(uint32_t baud) {
+#if defined SOFTWARESERIAL_AVAILABLE
 	if(SWSerial) {
 		SWSerial->begin(baud);
 	} else {
 		HWSerial->begin(baud);
 	}
+#else
+	HWSerial->begin(baud);
+#endif
 }
 
 int RESOLino_Pt1000::available() {
+#if defined SOFTWARESERIAL_AVAILABLE
 	if(SWSerial) {
 		return SWSerial->available();
 	} else {
 		return HWSerial->available();
 	}
+#else
+	HWSerial->available();
+#endif
 }
 
 int RESOLino_Pt1000::read() {
+#if defined SOFTWARESERIAL_AVAILABLE
 	if(SWSerial) {
 		return SWSerial->read();
 	} else {
 		return HWSerial->read();
 	}
+#else
+	HWSerial->read();
+#endif
 }
 
 static void _SendByte(uint8_t Output) {
+#if defined SOFTWARESERIAL_AVAILABLE
 	if(SWSerial) {
 		SWSerial->write(Output);
 	} else {
 		HWSerial->write(Output);
 	}
+#else
+	HWSerial->write(Output);
+#endif
 }
 
 static void _DatagramReceived(int16_t  Dst, int16_t  Src, int16_t  Cmd, uint16_t ValueId, uint32_t Value) {

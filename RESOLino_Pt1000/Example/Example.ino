@@ -1,4 +1,4 @@
-#include <SoftwareSerial.h>
+#include <SoftwareSerial.h> // Delete for use with boards without SoftwareSerial (Due, Zero)!
 #include <RESOLino_Pt1000.h>
 
 #define NR_OF_Pt1000_TERMINALS 8
@@ -10,11 +10,11 @@ int cycleNr;									// Nr of current cycle (for printValues).
 
 SoftwareSerial ssPt1000(5, 6, false); 			// SoftwareSerial for Arduino Uno. Please check which pins can be used on other boards.
 RESOLino_Pt1000 pt1000Shield(&ssPt1000);		// Create a new instance of RESOLino_Pt1000 and use SoftwareSerail for communication. 
-// RESOLino_Pt1000 pt1000Shield(&Serial1);		// For Arduino Mega it is recommanded to use HardwareSerial for communication.
+// RESOLino_Pt1000 pt1000Shield(&Serial1);		// For Arduino Mega it is recommended to use HardwareSerial for communication.
 
 void setup() {
 	Serial.begin(57600);						// Initializing the Serial connection to the PC.
-	pt1000Shield.init(19200);					// Initializing the connection with 19200 baud. See discription in the librarys header which baud is recommanded.
+	pt1000Shield.init(19200);					// Initializing the connection with 19200 baud. See discription in the librarys header which baud is recommended.
 	pt1000Shield.setPriorityTerminal(4);		// Setting the priority terminal. 
 	timestamp = millis();
 }
@@ -24,11 +24,11 @@ void loop() {
 		for (int i = 0; i < NR_OF_Pt1000_TERMINALS; i++) { // Loop to get all terminals.
 			// Receive a new value of the terminal. keep in mind, the terminals are numbered 1 to 8. 
 			// Also setting the individual conversion function for this terminal.
-			// MEasurement result is stored in the global array.
+			// Measurement result is stored in the global array.
 			pt1000Shield.update(i + 1, &pt1000Data[i], pt1000Shield.Conversion_Pt1000_To_DegreeCentigrade, NULL); 
 		}
 		printValues();								// Print all received values.
-		cycleNr++;									// Increases cycle.
+		cycleNr++;									// Increase cycle.
 		timestamp = millis();						// Restart interval.
 	}
 }

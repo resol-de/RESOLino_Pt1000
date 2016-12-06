@@ -96,13 +96,17 @@
 #ifndef _RESOLino_PT1000_h
 #define _RESOLino_PT1000_h
 
+#define SOFTWARESERIAL_AVAILABLE
+
 #if defined(ARDUINO) && ARDUINO >= 100
 	#include "Arduino.h"
 #else
 	#include "WProgram.h"
 #endif
 
-#include "SoftwareSerial.h"
+#if defined SOFTWARESERIAL_AVAILABLE
+	#include "SoftwareSerial.h"
+#endif
 
 #define BAUD_ID 0x0001
 #define ADSPEED_ID 0x0002
@@ -123,7 +127,9 @@ class RESOLino_Pt1000
 	int read();
  public:
  	typedef enum AD_OPERAING_SPEED_t {HZ16 = 0x04, HZ20 = 0x03, HZ33 = 0x02, HZ100 = 0x01, HZ120 = 0x00} AD_OPERAING_SPEED;
+#if defined SOFTWARESERIAL_AVAILABLE
 	RESOLino_Pt1000(SoftwareSerial *serial);
+#endif
 	RESOLino_Pt1000(HardwareSerial *serial);
 
 	static const uint8_t Conversion_RawOhm = 0;
