@@ -20,94 +20,124 @@
  * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
+
 #include "RESOLino_Pt1000.h"
 
-static void _SendByte(uint8_t Output);
-static void _DatagramReceived(int16_t  Dst, int16_t  Src, int16_t  Cmd, uint16_t ValueId, uint32_t Value);
-static void Rs_VBus_SendDatagram(int16_t  Dst, int16_t  Src, int16_t  Cmd, uint16_t ValueId, uint32_t Value);
-static void Rs_VBus_SendPacketFrame(uint8_t Data0, uint8_t Data1, uint8_t Data2, uint8_t Data3);
-static void Rs_VBus_SendPacketHeader(int16_t  Dst, int16_t  Src, int16_t  Cmd, int8_t FrameCount);
-static void Rs_VBus_SendByteWithCrcAndSeptet(uint8_t Data, uint8_t* Crc, uint8_t* SeptetValue, uint8_t* SeptetMask);
-static void Rs_VBus_SendByteWithCrc(uint8_t Data, uint8_t* Crc);
-static void Rs_VBus_ByteReceived(uint8_t Data);
-static int Rs_VBus_CheckRxCrc(const uint8_t *Buffer, int Offset, int Length, uint8_t RxProtocolSelector);
-static uint8_t Rs_VBus_EndTxCrc(uint8_t Crc);
-static uint8_t Rs_VBus_CalcTxCrc(uint8_t Crc, uint8_t Data);
-static uint8_t Rs_VBus_StartTxCrc();
-static uint8_t Rs_VBus_ExtractSeptett(uint8_t* Buffer, uint16_t Offset, uint16_t Length);
-static void Rs_VBus_InjectSeptett(uint8_t* Buffer, uint16_t Offset, uint16_t Length, uint8_t Septett);
-static uint8_t Rs_VBus_CalcCrc(uint8_t* Buffer, uint16_t Offset, uint16_t Length);
-
-static int _RxIndex;
-static int8_t _RxFrameNr;
-static uint8_t _RxBuffer[17];
-static double Values[8];
-
-static HardwareSerial *HWSerial;
 #if defined SOFTWARESERIAL_AVAILABLE
-	static SoftwareSerial *SWSerial;
+RESOLino_Pt1000::RESOLino_Pt1000(SoftwareSerial *serial) {
+	hwSerial = NULL;
+	swSerial = serial;
+}
 #endif
-
-static uint16_t ValueIDs[8] = {
-	0x1001,
-	0x1002,
-	0x1003,
-	0x1004,
-	0x1005,
-	0x1006,
-	0x1007,
-	0x1008
-};
-
-RESOLino_Pt1000::RESOLino_Pt1000(HardwareSerial *ser) {
-	HWSerial = ser;
+RESOLino_Pt1000::RESOLino_Pt1000(HardwareSerial *serial) {
+	hwSerial = serial;
 #if defined SOFTWARESERIAL_AVAILABLE
-	SWSerial = NULL;
+	swSerial = NULL;
 #endif
 }
 
-#if defined SOFTWARESERIAL_AVAILABLE
-RESOLino_Pt1000::RESOLino_Pt1000(SoftwareSerial *ser) {
-	HWSerial = NULL;
-	SWSerial = ser;
-}
-#endif
-
-void RESOLino_Pt1000::init(uint32_t Baudrate) {
-	_RxIndex = -1;
-
+void RESOLino_Pt1000::init(uint32_t baudrate) {
+	rxIndex = -1;
 	for(int i = 0; i < 8; i++) {
-		Values[i] = -1;
+		values[i] = -1;
 	}
-	setBaudrate(Baudrate);
+	setBaudrate(baudrate);
+}
+
+void RESOLino_Pt1000::setPriorityTerminal(int32_t terminal) {
+	sendDatagram(0x0200, RS_VBUS_PRIORITY_ID, terminal - 1);
+	receiveData();
 }
 
 void RESOLino_Pt1000::setADOperatingSpeed(AD_OPERAING_SPEED hz) {
-	Rs_VBus_SendDatagram(SHIELD_ADDRESS, SOURCE_ADDRESS, 0x0200, ADSPEED_ID, hz);
-
-	if (receive() < 0) {
+	sendDatagram(0x0200, RS_VBUS_AD_SPEED_ID, hz);
+	if (receiveData() < 0) {
 		return;
 	}
 }
 
-void RESOLino_Pt1000::setBaudrate(uint32_t Baudrate) {
-	uint32_t Baudrates[4] = {9600, 19200, 38400, 57600};
-	int i = 0;
+void RESOLino_Pt1000::update(int sensorNr, double *value, uint8_t conversion, double (*customConversionFunction)(double rawOhm)) {
+#if defined SOFTWARESERIAL_AVAILABLE
+	if(swSerial) { // if more than one SoftwareSerial instances are used, you need to select the one currently listening to
+		swSerial->listen();
+	}
+#endif
+	sendDatagram(0x0300, valueIDs[sensorNr - 1], 0x0);
+	if (receiveData() < 0) {
+		*value = -1;
+		return;
+	}
+	double raw = values[sensorNr - 1];
+	if (raw == -1.0) {
+		*value = -1.0;
+		return;
+	}
+	double radicand = 0;
+	if (conversion == Conversion_RawOhm) {
+		*value = raw;
+	} else if (conversion == Conversion_Pt100_To_DegreeCentigrade) {
+		radicand = 1 - 0.15123 * (raw / 100 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
 
+		*value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand));
+	} else if (conversion == Conversion_Pt500_To_DegreeCentigrade) {
+		radicand = 1 - 0.15123 * (raw / 500 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
+
+		*value = 500.0 * 3.3838 * (1 - sqrt(radicand));
+	} else if (conversion == Conversion_Pt1000_To_DegreeCentigrade) {
+		radicand = 1 - 0.15123 * (raw / 1000 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
+
+		*value = 1000.0 * 3.3838 * (1 - sqrt(radicand));
+	} else if (conversion == Conversion_Pt100_To_DegreeFahrenheit) {
+		radicand = 1 - 0.15123 * (raw / 100 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
+
+		*value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand)) * 1.8 + 32;
+	} else if (conversion == Conversion_Pt500_To_DegreeFahrenheit) {
+		radicand = 1 - 0.15123 * (raw / 500 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
+
+		*value = 500.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
+	} else if (conversion == Conversion_Pt1000_To_DegreeFahrenheit) {
+		radicand = 1 - 0.15123 * (raw / 1000 - 1);
+		radicand = radicand < 0 ? 0 : radicand;
+
+		*value = 1000.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
+	} else if (conversion == Conversion_CustomFunction) {
+		*value = customConversionFunction(raw);
+	}
+}
+
+void RESOLino_Pt1000::begin(uint32_t baud) {
+#if defined SOFTWARESERIAL_AVAILABLE
+	if(swSerial) {
+		swSerial->begin(baud);
+	} else {
+		hwSerial->begin(baud);
+	}
+#else
+	hwSerial->begin(baud);
+#endif
+}
+
+void RESOLino_Pt1000::setBaudrate(uint32_t baud) {
+	uint32_t baudrates[4] = {9600, 19200, 38400, 57600};
+	int i = 0;
 	bool success = false;
 	while (!success && i < 3) {
-		Rs_VBus_SendDatagram(SHIELD_ADDRESS, SOURCE_ADDRESS, 0x0200, BAUD_ID, Baudrate);
-
-		if(receive() > -1) {
+		sendDatagram(0x0200, RS_VBUS_BAUD_ID, baud);
+		if(receiveData() > -1) {
 			delay(20);
-			begin(Baudrate);
+			begin(baud);
 			success = true;
 		} else {
-			begin(Baudrates[i]);
+			begin(baudrates[i]);
 			i++;
 		}
 	}
-	if (HWSerial) {
+	if (hwSerial) {
 		int retry;
 		double value;
 		for (int i = 0; i < 8; i++) {
@@ -120,305 +150,173 @@ void RESOLino_Pt1000::setBaudrate(uint32_t Baudrate) {
 	}
 }
 
-void RESOLino_Pt1000::setPriorityTerminal(int32_t  Terminal) {
-	Rs_VBus_SendDatagram(SHIELD_ADDRESS, SOURCE_ADDRESS, 0x0200, PRIO_ID, Terminal - 1);
-	receive();
+int RESOLino_Pt1000::available() {
+#if defined SOFTWARESERIAL_AVAILABLE
+	if(swSerial) {
+		return swSerial->available();
+	} else {
+		return hwSerial->available();
+	}
+#else
+	hwSerial->available();
+#endif
 }
 
-void RESOLino_Pt1000::update(int SensorNr, double *Value, uint8_t Conversion, double (*CustomConversionFunction)(double RawOhm)) {
-	Rs_VBus_SendDatagram(SHIELD_ADDRESS, SOURCE_ADDRESS, 0x0300, ValueIDs[SensorNr - 1], 0x0);
-	if (receive() < 0) {
-		*Value = -1;
-		return;
+int RESOLino_Pt1000::readByte() {
+#if defined SOFTWARESERIAL_AVAILABLE
+	if(swSerial) {
+		return swSerial->read();
+	} else {
+		return hwSerial->read();
 	}
-	double raw = Values[SensorNr - 1];
-	if (raw == -1.0) {
-		*Value = -1.0;
-		return;
-	}
-	double radicand = 0;
-	if (Conversion == Conversion_RawOhm) {
-		*Value = raw;
-	} else if (Conversion == Conversion_Pt100_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 100 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand));
-	} else if (Conversion == Conversion_Pt500_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 500 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 500.0 * 3.3838 * (1 - sqrt(radicand));
-	} else if (Conversion == Conversion_Pt1000_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 1000 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 1000.0 * 3.3838 * (1 - sqrt(radicand));
-	} else if (Conversion == Conversion_Pt100_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 100 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand)) * 1.8 + 32;
-	} else if (Conversion == Conversion_Pt500_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 500 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 500.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
-	} else if (Conversion == Conversion_Pt1000_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 1000 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*Value = 1000.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
-	} else if (Conversion == Conversion_CustomFunction) {
-		*Value = CustomConversionFunction(raw);
-	}
+#else
+	hwSerial->read();
+#endif
 }
 
-int RESOLino_Pt1000::receive(void) {
+int RESOLino_Pt1000::receiveData() {
 	long timeout = millis();
 	while (!available()) {
-		if (millis() - timeout > TIMEOUT) {
+		if (millis() - timeout > RECEIVE_TIMEOUT_MS) {
 			return -1;
 		}
 	}
 	while (available()) {
 		delay(1);
-		Rs_VBus_ByteReceived(read());
+		byteReceived(readByte());
 	}
 	return 0;
 }
 
-void RESOLino_Pt1000::begin(uint32_t baud) {
+void RESOLino_Pt1000::sendByte(uint8_t output) {
 #if defined SOFTWARESERIAL_AVAILABLE
-	if(SWSerial) {
-		SWSerial->begin(baud);
+	if(swSerial) {
+		swSerial->write(output);
 	} else {
-		HWSerial->begin(baud);
+		hwSerial->write(output);
 	}
 #else
-	HWSerial->begin(baud);
+	hwSerial->write(output);
 #endif
 }
 
-int RESOLino_Pt1000::available() {
-#if defined SOFTWARESERIAL_AVAILABLE
-	if(SWSerial) {
-		return SWSerial->available();
-	} else {
-		return HWSerial->available();
-	}
-#else
-	HWSerial->available();
-#endif
-}
-
-int RESOLino_Pt1000::read() {
-#if defined SOFTWARESERIAL_AVAILABLE
-	if(SWSerial) {
-		return SWSerial->read();
-	} else {
-		return HWSerial->read();
-	}
-#else
-	HWSerial->read();
-#endif
-}
-
-static void _SendByte(uint8_t Output) {
-#if defined SOFTWARESERIAL_AVAILABLE
-	if(SWSerial) {
-		SWSerial->write(Output);
-	} else {
-		HWSerial->write(Output);
-	}
-#else
-	HWSerial->write(Output);
-#endif
-}
-
-static void _DatagramReceived(int16_t  Dst, int16_t  Src, int16_t  Cmd, uint16_t ValueId, uint32_t Value) {
+void RESOLino_Pt1000::datagramReceived(int16_t dst, int16_t src, int16_t cmd, uint16_t valueId, uint32_t value) {
 	int idx = -1;
 	for(int i = 0; i < 8; i++) {
-		if (ValueId == ValueIDs[i]) {
+		if (valueId == valueIDs[i]) {
 			idx = i;
 			break;
 		}
 	}
 	if(idx > -1) {
-		// Value = Value > MAXRAW ? MAXRAW : Value;
-		Values[idx] = ((double)Value) / 1000.0;
+		values[idx] = ((double)value) / 1000.0;
 	}
 }
 
-static void Rs_VBus_InjectSeptett(uint8_t* Buffer, uint16_t Offset, uint16_t Length, uint8_t Septett) {
+void RESOLino_Pt1000::injectSeptett(uint8_t* buffer, uint16_t offset, uint16_t length, uint8_t septett) {
 	uint16_t i;
-	for (i = 0; i < Length; i++) {
-		if (Septett & (1 << i)) {
-			Buffer [Offset + i] |= 0x80;
+	for (i = 0; i < length; i++) {
+		if (septett & (1 << i)) {
+			buffer[offset + i] |= 0x80;
 		}
 	}
 }
 
-static uint8_t Rs_VBus_StartTxCrc() {
-	uint8_t Crc;
-	Crc = 0xFF;
-	return Crc;
+uint8_t RESOLino_Pt1000::startTxCrc() {
+	uint8_t crc;
+	crc = 0xFF;
+	return crc;
 }
 
-static uint8_t Rs_VBus_CalcTxCrc(uint8_t Crc, uint8_t Data) {
-	Crc -= Data;
-	return Crc;
+uint8_t RESOLino_Pt1000::calcTxCrc(uint8_t crc, uint8_t data) {
+	crc -= data;
+	return crc;
 }
 
-
-static uint8_t Rs_VBus_EndTxCrc(uint8_t Crc) {
-	Crc = (Crc & 0x7F);
-	return Crc;
+uint8_t RESOLino_Pt1000::endTxCrc(uint8_t crc) {
+	crc = (crc & 0x7F);
+	return crc;
 }
 
-static int Rs_VBus_CheckRxCrc(const uint8_t *Buffer, int Offset, int Length, uint8_t RxProtocolSelector) {
-	int Result;
-	if (RxProtocolSelector == 0) {
-		uint8_t Crc;
+int RESOLino_Pt1000::checkRxCrc(const uint8_t *buffer, int offset, int length, uint8_t rxProtocolSelector) {
+	int result;
+	if (rxProtocolSelector == 0) {
+		uint8_t crc;
 		int i;
-
-		Crc = 0xFF;
-		for (i = 0; i < Length; i++) {
-			Crc -= Buffer [Offset + i];
+		crc = 0xFF;
+		for (i = 0; i < length; i++) {
+			crc -= buffer[offset + i];
 		}
-		Result = ((Crc & 0x7F) == 0x00);
+		result = ((crc & 0x7F) == 0x00);
 	} else {
-		Result = 0;
+		result = 0;
 	}
-	return Result;
+	return result;
 }
 
-static void Rs_VBus_ByteReceived(uint8_t Data) {
-	int16_t  Dst, Src, Cmd;
-	int8_t FrameCount;
-	uint16_t ValueId;
-	uint32_t Value;
-	if (Data == 0xAA) {
-		_RxIndex = 0;
-	} else if (Data & 0x80) {
-		_RxIndex = -1;
-	} else if (_RxIndex >= (int)sizeof (_RxBuffer)) {
-		_RxIndex = -1;
+void RESOLino_Pt1000::byteReceived(uint8_t data) {
+	int16_t  dst, src, cmd;
+	uint16_t valueId;
+	uint32_t value;
+	if (data == 0xAA) {
+		rxIndex = 0;
+	} else if (data & 0x80) {
+		rxIndex = -1;
+	} else if (rxIndex >= (int)sizeof (rxBuffer)) {
+		rxIndex = -1;
 	}
-	if (_RxIndex >= 0) {
-		_RxBuffer [_RxIndex++] = Data;
-		if ((_RxIndex == 10) && ((_RxBuffer [5] & 0xF0) == 0x10)) {
-			if (Rs_VBus_CheckRxCrc(_RxBuffer, 1, 9, _RxBuffer [5] & 0x0F)) {
-				_RxFrameNr = -1;
-				Dst = ((uint16_t) _RxBuffer [1]) | (((uint16_t) _RxBuffer [2]) << 8);
-				Src = ((uint16_t) _RxBuffer [3]) | (((uint16_t) _RxBuffer [4]) << 8);
-				Cmd = ((uint16_t) _RxBuffer [6]) | (((uint16_t) _RxBuffer [7]) << 8);
-				FrameCount = _RxBuffer [8];
-				//_PacketReceived(Dst, Src, Cmd, FrameCount, _RxFrameNr++, 0);
-				if (FrameCount == _RxFrameNr) {
-					_RxIndex = -1;
-				}
+	if (rxIndex >= 0) {
+		rxBuffer [rxIndex++] = data;
+		if ((rxIndex == 16) && ((rxBuffer [5] & 0xF0) == 0x20)) {
+			if (checkRxCrc(rxBuffer, 1, 15, rxBuffer [5] & 0x0F)) {
+				injectSeptett(rxBuffer, 8, 6, rxBuffer [14]);
+				dst = ((uint16_t) rxBuffer [1]) | (((uint16_t) rxBuffer [2]) << 8);
+				src = ((uint16_t) rxBuffer [3]) | (((uint16_t) rxBuffer [4]) << 8);
+				cmd = ((uint16_t) rxBuffer [6]) | (((uint16_t) rxBuffer [7]) << 8);
+				valueId = ((uint16_t) rxBuffer [8]) | (((uint16_t) rxBuffer [9]) << 8);
+				value = ((uint32_t) rxBuffer [10]) | (((uint32_t) rxBuffer [11]) << 8) | (((uint32_t) rxBuffer [12]) << 16) | (((uint32_t) rxBuffer [13]) << 24);
+				datagramReceived(dst, src, cmd, valueId, value);
+				rxIndex = -1;
 			} else {
-				_RxIndex = -1;
-			}
-		} else if ((_RxIndex == 16) && ((_RxBuffer [5] & 0xF0) == 0x10)) {
-			if (Rs_VBus_CheckRxCrc(_RxBuffer, 10, 6, _RxBuffer [5] & 0x0F)) {
-				Rs_VBus_InjectSeptett(_RxBuffer, 10, 4, _RxBuffer [14]);
-				Dst = ((uint16_t) _RxBuffer [1]) | (((uint16_t) _RxBuffer [2]) << 8);
-				Src = ((uint16_t) _RxBuffer [3]) | (((uint16_t) _RxBuffer [4]) << 8);
-				Cmd = ((uint16_t) _RxBuffer [6]) | (((uint16_t) _RxBuffer [7]) << 8);
-				FrameCount = _RxBuffer [8];
-				//_PacketReceived(Dst, Src, Cmd, FrameCount, _RxFrameNr++, _RxBuffer + 10);
-				if (FrameCount == _RxFrameNr) {
-					_RxIndex = -1;
-				} else {
-					_RxIndex = 10;
-				}
-			} else {
-				_RxIndex = -1;
-			}
-		} else if ((_RxIndex == 16) && ((_RxBuffer [5] & 0xF0) == 0x20)) {
-			if (Rs_VBus_CheckRxCrc(_RxBuffer, 1, 15, _RxBuffer [5] & 0x0F)) {
-				Rs_VBus_InjectSeptett(_RxBuffer, 8, 6, _RxBuffer [14]);
-				Dst = ((uint16_t) _RxBuffer [1]) | (((uint16_t) _RxBuffer [2]) << 8);
-				Src = ((uint16_t) _RxBuffer [3]) | (((uint16_t) _RxBuffer [4]) << 8);
-				Cmd = ((uint16_t) _RxBuffer [6]) | (((uint16_t) _RxBuffer [7]) << 8);
-				ValueId = ((uint16_t) _RxBuffer [8]) | (((uint16_t) _RxBuffer [9]) << 8);
-				Value = ((uint32_t) _RxBuffer [10]) | (((uint32_t) _RxBuffer [11]) << 8) | (((uint32_t) _RxBuffer [12]) << 16) | (((uint32_t) _RxBuffer [13]) << 24);
-				_DatagramReceived(Dst, Src, Cmd, ValueId, Value);
-				_RxIndex = -1;
-			} else {
-				_RxIndex = -1;
+				rxIndex = -1;
 			}
 		}
 	}
 }
 
-static void Rs_VBus_SendByteWithCrc(uint8_t Data, uint8_t* Crc) {
-	*Crc = Rs_VBus_CalcTxCrc(*Crc, Data);
-	_SendByte(Data);
+void RESOLino_Pt1000::sendByteWithCrc(uint8_t data, uint8_t* crc) {
+	*crc = calcTxCrc(*crc, data);
+	sendByte(data);
 }
 
-static void Rs_VBus_SendByteWithCrcAndSeptet(uint8_t Data, uint8_t* Crc, uint8_t* SeptetValue, uint8_t* SeptetMask) {
-	if (Data & 0x80) {
-		*SeptetValue |= *SeptetMask;
+void RESOLino_Pt1000::sendByteWithCrcAndSeptet(uint8_t data, uint8_t* crc, uint8_t* septetValue, uint8_t* septetMask) {
+	if (data & 0x80) {
+		*septetValue |= *septetMask;
 	}
-	*SeptetMask <<= 1;
-
-	Rs_VBus_SendByteWithCrc(Data & 0x7F, Crc);
+	*septetMask <<= 1;
+	sendByteWithCrc(data & 0x7F, crc);
 }
 
-static void Rs_VBus_SendPacketHeader(int16_t  Dst, int16_t  Src, int16_t  Cmd, int8_t FrameCount) {
-	uint8_t Crc;
 
-	Crc = Rs_VBus_StartTxCrc();
-	_SendByte(0xAA);
-	Rs_VBus_SendByteWithCrc(Dst, &Crc);
-	Rs_VBus_SendByteWithCrc(Dst >> 8, &Crc);
-	Rs_VBus_SendByteWithCrc(Src, &Crc);
-	Rs_VBus_SendByteWithCrc(Src >> 8, &Crc);
-	Rs_VBus_SendByteWithCrc(0x10, &Crc);
-	Rs_VBus_SendByteWithCrc(Cmd, &Crc);
-	Rs_VBus_SendByteWithCrc(Cmd >> 8, &Crc);
-	Rs_VBus_SendByteWithCrc(FrameCount, &Crc);
-	_SendByte(Rs_VBus_EndTxCrc(Crc));
-}
-
-static void Rs_VBus_SendPacketFrame(uint8_t Data0, uint8_t Data1, uint8_t Data2, uint8_t Data3) {
-	uint8_t Crc, Septet, Mask;
-
-	Crc = Rs_VBus_StartTxCrc();
-	Septet = 0;
-	Mask = 1;
-	Rs_VBus_SendByteWithCrcAndSeptet(Data0, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Data1, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Data2, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Data3, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrc(Septet, &Crc);
-	_SendByte(Rs_VBus_EndTxCrc(Crc));
-}
-
-static void Rs_VBus_SendDatagram(int16_t  Dst, int16_t  Src, int16_t  Cmd, uint16_t ValueId, uint32_t Value) {
-	uint8_t Crc, Septet, Mask;
-
-	Crc = Rs_VBus_StartTxCrc();
-	Septet = 0;
-	Mask = 1;
-
-	_SendByte(0xAA);
-	Rs_VBus_SendByteWithCrc(Dst, &Crc);
-	Rs_VBus_SendByteWithCrc(Dst >> 8, &Crc);
-	Rs_VBus_SendByteWithCrc(Src, &Crc);
-	Rs_VBus_SendByteWithCrc(Src >> 8, &Crc);
-	Rs_VBus_SendByteWithCrc(0x20, &Crc);
-	Rs_VBus_SendByteWithCrc(Cmd, &Crc);
-	Rs_VBus_SendByteWithCrc(Cmd >> 8, &Crc);
-	Rs_VBus_SendByteWithCrcAndSeptet(ValueId, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(ValueId >> 8, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Value, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Value >> 8, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Value >> 16, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrcAndSeptet(Value >> 24, &Crc, &Septet, &Mask);
-	Rs_VBus_SendByteWithCrc(Septet, &Crc);
-	_SendByte(Rs_VBus_EndTxCrc(Crc));
+void RESOLino_Pt1000::sendDatagram(int16_t cmd, uint16_t valueId, uint32_t value) {
+	uint8_t crc, septet, mask;
+	crc = startTxCrc();
+	septet = 0;
+	mask = 1;
+	sendByte(0xAA);
+	sendByteWithCrc(RS_VBUS_SHIELD_ADDRESS, &crc);
+	sendByteWithCrc(RS_VBUS_SHIELD_ADDRESS >> 8, &crc);
+	sendByteWithCrc(RS_VBUS_SOURCE_ADDRESS, &crc);
+	sendByteWithCrc(RS_VBUS_SOURCE_ADDRESS >> 8, &crc);
+	sendByteWithCrc(0x20, &crc);
+	sendByteWithCrc(cmd, &crc);
+	sendByteWithCrc(cmd >> 8, &crc);
+	sendByteWithCrcAndSeptet(valueId, &crc, &septet, &mask);
+	sendByteWithCrcAndSeptet(valueId >> 8, &crc, &septet, &mask);
+	sendByteWithCrcAndSeptet(value, &crc, &septet, &mask);
+	sendByteWithCrcAndSeptet(value >> 8, &crc, &septet, &mask);
+	sendByteWithCrcAndSeptet(value >> 16, &crc, &septet, &mask);
+	sendByteWithCrcAndSeptet(value >> 24, &crc, &septet, &mask);
+	sendByteWithCrc(septet, &crc);
+	sendByte(endTxCrc(crc));
 }

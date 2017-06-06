@@ -108,29 +108,18 @@
 	#include "SoftwareSerial.h"
 #endif
 
-#define BAUD_ID 0x0001
-#define ADSPEED_ID 0x0002
-#define PRIO_ID 0x100A
-#define SHIELD_ADDRESS 0x7770
-#define SOURCE_ADDRESS 0x0020
+#define RS_VBUS_BAUD_ID 0x0001
+#define RS_VBUS_AD_SPEED_ID 0x0002
+#define RS_VBUS_PRIORITY_ID 0x100A
+#define RS_VBUS_SHIELD_ADDRESS 0x7770
+#define RS_VBUS_SOURCE_ADDRESS 0x0020
 
-#define TIMEOUT 100 //ms
-#define MAXRAW 10000000
+#define RECEIVE_TIMEOUT_MS 100 //ms
+#define MAX_RAW_VALUE 10000000
 
-class RESOLino_Pt1000
-{
- private:
-	int receive(void);
-	void setBaudrate(uint32_t Baudrate);
-	void begin(uint32_t baud);
-	int available();
-	int read();
- public:
- 	typedef enum AD_OPERAING_SPEED_t {HZ16 = 0x04, HZ20 = 0x03, HZ33 = 0x02, HZ100 = 0x01, HZ120 = 0x00} AD_OPERAING_SPEED;
-#if defined SOFTWARESERIAL_AVAILABLE
-	RESOLino_Pt1000(SoftwareSerial *serial);
-#endif
-	RESOLino_Pt1000(HardwareSerial *serial);
+class RESOLino_Pt1000 {
+public: // public attributes
+	typedef enum AD_OPERAING_SPEED_t {HZ16 = 0x04, HZ20 = 0x03, HZ33 = 0x02, HZ100 = 0x01, HZ120 = 0x00} AD_OPERAING_SPEED;
 
 	static const uint8_t Conversion_RawOhm = 0;
 	static const uint8_t Conversion_Pt100_To_DegreeCentigrade = 1;
@@ -141,10 +130,61 @@ class RESOLino_Pt1000
 	static const uint8_t Conversion_Pt1000_To_DegreeFahrenheit = 6;
 	static const uint8_t Conversion_CustomFunction = 7;
 
-	void init(uint32_t Baudrate = 9600);
-	void setPriorityTerminal(int32_t  Terminal);
+public: // public methods
+#if defined SOFTWARESERIAL_AVAILABLE
+	RESOLino_Pt1000(SoftwareSerial *serial);
+#endif
+	RESOLino_Pt1000(HardwareSerial *serial);
+
+	void init(uint32_t baudrate = 9600);
+	void setPriorityTerminal(int32_t terminal);
 	void setADOperatingSpeed(AD_OPERAING_SPEED hz);
-	void update(int SensorNr, double *Value, uint8_t Conversion, double (*CustomConversionFunction)(double RawOhm));
+	void update(int sensorNr, double *value, uint8_t conversion, double (*customConversionFunction)(double rawOhm));
+
+private: // private attributes
+	HardwareSerial *hwSerial;
+#if defined SOFTWARESERIAL_AVAILABLE
+	SoftwareSerial *swSerial;
+#endif
+	uint8_t rxIndex;
+	int8_t rxFrameNr;
+	uint8_t rxBuffer[17];
+	double values[8];
+
+	const uint16_t valueIDs[8] = {
+		0x1001,
+		0x1002,
+		0x1003,
+		0x1004,
+		0x1005,
+		0x1006,
+		0x1007,
+		0x1008
+	};
+
+private: // private methods
+	void begin(uint32_t baud);
+	void setBaudrate(uint32_t baud);
+	
+	int available();
+	int readByte();
+	int receiveData();
+	
+	void sendByte(uint8_t output);
+
+	void datagramReceived(int16_t dst, int16_t src, int16_t cmd, uint16_t valueId, uint32_t value);
+	void injectSeptett(uint8_t* buffer, uint16_t offset, uint16_t length, uint8_t septett);
+
+	uint8_t startTxCrc();
+	uint8_t calcTxCrc(uint8_t crc, uint8_t data);
+	uint8_t endTxCrc(uint8_t crc);
+	int checkRxCrc(const uint8_t *buffer, int offset, int length, uint8_t rxProtocolSelector);
+
+	void byteReceived(uint8_t data);
+
+	void sendByteWithCrc(uint8_t data, uint8_t* crc);
+	void sendByteWithCrcAndSeptet(uint8_t data, uint8_t* crc, uint8_t* septetValue, uint8_t* septetMask);
+	void sendDatagram(int16_t cmd, uint16_t valueId, uint32_t value);
 };
 
 extern RESOLino_Pt1000 RESOLino_PT1000;
