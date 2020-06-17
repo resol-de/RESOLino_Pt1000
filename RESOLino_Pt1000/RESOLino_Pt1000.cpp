@@ -72,41 +72,42 @@ void RESOLino_Pt1000::update(int sensorNr, double *value, uint8_t conversion, do
 		*value = -1.0;
 		return;
 	}
+	*value = raw;
 	double radicand = 0;
-	if (conversion == Conversion_RawOhm) {
-		*value = raw;
-	} else if (conversion == Conversion_Pt100_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 100 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand));
-	} else if (conversion == Conversion_Pt500_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 500 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 500.0 * 3.3838 * (1 - sqrt(radicand));
-	} else if (conversion == Conversion_Pt1000_To_DegreeCentigrade) {
-		radicand = 1 - 0.15123 * (raw / 1000 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 1000.0 * 3.3838 * (1 - sqrt(radicand));
-	} else if (conversion == Conversion_Pt100_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 100 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 100.0 * 3.3838 * (1 - sqrt(1 - radicand)) * 1.8 + 32;
-	} else if (conversion == Conversion_Pt500_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 500 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 500.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
-	} else if (conversion == Conversion_Pt1000_To_DegreeFahrenheit) {
-		radicand = 1 - 0.15123 * (raw / 1000 - 1);
-		radicand = radicand < 0 ? 0 : radicand;
-
-		*value = 1000.0 * 3.3838 * (1 - sqrt(radicand)) * 1.8 + 32;
-	} else if (conversion == Conversion_CustomFunction) {
-		*value = customConversionFunction(raw);
+	uint8_t isFarenheit = 0;
+	switch (conversion) {
+		case Conversion_RawOhm:
+			break;
+		case Conversion_Pt100_To_DegreeCentigrade:
+			radicand = 100;
+			break;
+		case Conversion_Pt500_To_DegreeCentigrade:
+			radicand = 500;
+			break;
+		case Conversion_Pt1000_To_DegreeCentigrade:
+			radicand = 1000;
+			break;
+		case Conversion_Pt100_To_DegreeFahrenheit:
+			radicand = 100;
+			isFarenheit = 1;
+			break;
+		case Conversion_Pt500_To_DegreeFahrenheit:
+			radicand = 500;
+			isFarenheit = 1;
+			break;
+		case Conversion_Pt1000_To_DegreeFahrenheit:
+			radicand = 1000;
+			isFarenheit = 1;
+			break;
+		case Conversion_CustomFunction:
+			*value = customConversionFunction(raw);
+			break;
+	}
+	if (radicand) {
+		*value = (3383.81f - 1315.9f * sqrt(7.61247f - *value / radicand));
+	}
+	if (isFarenheit) {
+		*value = *value * 1.8 + 32;
 	}
 }
 
